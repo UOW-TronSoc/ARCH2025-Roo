@@ -2,16 +2,15 @@
 #include <WiFi.h>
 #include <WebServer.h>
 
-// Replace with your network credentials
 const char* ssid = "RooDash";
 const char* password = "12345678";
 
 // Set your static IP configuration
-IPAddress local_IP(192, 168, 4, 3);
-IPAddress gateway(192, 168, 4, 1);      // Adjust as needed
+IPAddress local_IP(192, 168, 4, 3); //Adjust between 192.168.4.2 and 192.168.4.3 (Gimbal .2 | Static .3)
+IPAddress gateway(192, 168, 4, 1);
 IPAddress subnet(255, 255, 255, 0);
-IPAddress primaryDNS(8, 8, 8, 8);        // Optional
-IPAddress secondaryDNS(8, 8, 4, 4);      // Optional
+IPAddress primaryDNS(8, 8, 8, 8);
+IPAddress secondaryDNS(8, 8, 4, 4);
 
 // Camera pin configuration for AI Thinker ESP32-CAM
 #define PWDN_GPIO_NUM     32
