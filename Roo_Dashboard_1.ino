@@ -4,12 +4,12 @@
 #include <math.h>
 
 // ----------------------------------------------------------------------------
-// Pin Definitions
+// Pin Definitions (updated per your request)
 // ----------------------------------------------------------------------------
 const int LED_PIN = 2;  // Built-in LED
 
-// Updated pin assignments:
-const int PIN_SPEED             = 25;  // DAC for Speed (0–100% mapped to 0–255)
+// New pin assignments:
+const int PIN_SPEED             = 25;  // DAC for Speed (0–100% mapped to 0–255, where 100% = 3.3V)
 const int PIN_FORWARD           = 36;  
 const int PIN_REVERSE           = 39;
 const int PIN_LEFT              = 34;
@@ -25,22 +25,22 @@ const int PIN_RESET_FORWARD_CAM = 19;
 // ----------------------------------------------------------------------------
 // GY-85 (ADXL345) Definitions for IMU (pitch/roll)
 // ----------------------------------------------------------------------------
-#define ADXL345_ADDR 0x53  // I2C address of the ADXL345 on the GY-85 board
+#define ADXL345_ADDR 0x53  // I2C address for ADXL345 on the GY-85 board
 
 // Global IMU data (pitch and roll in degrees)
 float g_pitch = 0.0f;  // Updated from IMU
 float g_roll  = 0.0f;  // Updated from IMU
 
 // Other global variables
-int   g_signal    = 0; // Unused for display; we show latency as "Signal Strength"
+int   g_signal    = 0; // Unused for display; latency is shown as "Signal Strength"
 int   g_power     = 1;
 int   g_connected = 1;
 int   g_attached  = 1;
 // g_speed is set by the speed slider (0–100%)
-// We interpret 100% as 0.56 m/s in our UI display.
+// Here 100% corresponds to 0.56 m/s.
 int   g_speed     = 60;  
 
-// Global button state variables (used for UI only)
+// Global button state variables (for drive and gimbal controls, UI only)
 bool  g_forward    = false;
 bool  g_reverse    = false;
 bool  g_left       = false;
@@ -96,15 +96,15 @@ void updateIMU() {
   int16_t y = Wire.read() | (Wire.read() << 8);
   int16_t z = Wire.read() | (Wire.read() << 8);
   
-  // Convert raw values to g's (assuming ±2g, ~3.9 mg per LSB)
+  // Convert raw data to g's (assuming ±2g range; each LSB ~ 3.9 mg)
   float xs = x * 0.0039f;
   float ys = y * 0.0039f;
   float zs = z * 0.0039f;
   
-  // Calculate pitch and roll in degrees:
-  // pitch = atan2(xs, sqrt(ys^2 + zs^2))
-  // roll  = atan2(ys, zs)
-  float pitch = atan2(xs, sqrtf(ys * ys + zs * zs)) * (180.0f / 3.14159f);
+  // Simple pitch/roll calculation:
+  // pitch = atan2(xs, sqrt(ys^2 + zs^2)) * (180/π)
+  // roll  = atan2(ys, zs) * (180/π)
+  float pitch = atan2(xs, sqrtf(ys*ys + zs*zs)) * (180.0f / 3.14159f);
   float roll  = atan2(ys, zs) * (180.0f / 3.14159f);
   
   g_pitch = pitch;
@@ -129,6 +129,7 @@ void processSerialInput() {
 // ----------------------------------------------------------------------------
 // HTML/JavaScript Code (concatenated string literal)
 // ----------------------------------------------------------------------------
+// Note: Video containers now use <img> tags to correctly display the MJPEG stream.
 const char index_html[] PROGMEM =
 "<!DOCTYPE html>"
 "<html lang=\"en\">"
@@ -142,7 +143,7 @@ const char index_html[] PROGMEM =
 "    .container { display: flex; flex: 1; }"
 "    .video-feed { display: flex; flex-direction: column; justify-content: flex-start; align-items: center; width: 50%; padding: 20px; box-sizing: border-box; }"
 "    .video-container { margin-bottom: 20px; width: 100%; }"
-"    video { width: 100%; height: auto; border: 2px solid #ccc; border-radius: 10px; }"
+"    img { width: 100%; height: auto; border: 2px solid #ccc; border-radius: 10px; }"
 "    .controls { width: 50%; padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; }"
 "    .status-row { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }"
 "    .pitch-roll-column { display: flex; flex-direction: column; gap: 20px; }"
@@ -181,8 +182,8 @@ const char index_html[] PROGMEM =
 "  <div class=\"header\"><h1>UOW Rover: Roo Control Panel</h1></div>"
 "  <div class=\"container\">"
 "    <div class=\"video-feed\">"
-"      <div class=\"video-container\"><div class=\"video-title\">Gimbal</div><video id=\"feed1\" autoplay muted src=\"http://192.168.4.2/stream\"></video></div>"
-"      <div class=\"video-container\"><div class=\"video-title\">Front</div><video id=\"feed2\" autoplay muted src=\"http://192.168.4.3/stream\"></video></div>"
+"      <div class=\"video-container\"><div class=\"video-title\">Gimbal</div><img id=\"feed1\" src=\"http://192.168.4.2/stream\" style=\"width:100%;\" /></div>"
+"      <div class=\"video-container\"><div class=\"video-title\">Front</div><img id=\"feed2\" src=\"http://192.168.4.3/stream\" style=\"width:100%;\" /></div>"
 "    </div>"
 "    <div class=\"controls\">"
 "      <div class=\"status-row\">"
@@ -334,233 +335,4 @@ const char index_html[] PROGMEM =
 "      const btnId = keyMapping[key];"
 "      if (btnId) {"
 "        let btn = document.getElementById(btnId);"
-"        if (btn) btn.classList.add('active');"
-"        sendCommand(btnId, 1);"
-"      }"
-"    });"
-"    document.addEventListener('keyup', function(e) {"
-"      let key = e.key.toLowerCase();"
-"      if (!keysPressed[key]) return;"
-"      delete keysPressed[key];"
-"      const btnId = keyMapping[key];"
-"      if (btnId) {"
-"        let btn = document.getElementById(btnId);"
-"        if (btn) btn.classList.remove('active');"
-"        sendCommand(btnId, 0);"
-"      }"
-"    });"
-"    document.querySelectorAll('.drive-controls button, .gimbal-controls button').forEach(btn => {"
-"      btn.addEventListener('mousedown', function() {"
-"        btn.classList.add('active');"
-"        sendCommand(btn.id, 1);"
-"      });"
-"      btn.addEventListener('mouseup', function() {"
-"        btn.classList.remove('active');"
-"        sendCommand(btn.id, 0);"
-"      });"
-"      btn.addEventListener('mouseleave', function() {"
-"        btn.classList.remove('active');"
-"        sendCommand(btn.id, 0);"
-"      });"
-"    });"
-"    document.getElementById('speed-slider').addEventListener('input', function() {"
-"      let val = this.value;"
-"      document.getElementById('speed-label').textContent = 'Speed: ' + val + '%';"
-"      sendCommand('speed', val);"
-"    });"
-"    const stopBtn = document.getElementById('stop-button');"
-"    stopBtn.addEventListener('mousedown', function() {"
-"      stopBtn.classList.add('active');"
-"      sendCommand('stop', 1);"
-"    });"
-"    stopBtn.addEventListener('mouseup', function() {"
-"      stopBtn.classList.remove('active');"
-"      sendCommand('stop', 0);"
-"    });"
-"    stopBtn.addEventListener('mouseleave', function() {"
-"      stopBtn.classList.remove('active');"
-"      sendCommand('stop', 0);"
-"    });"
-"  </script>"
-"</body>"
-"</html>";
-
-// ----------------------------------------------------------------------------
-// handleRoot: Serves the main webpage.
-// ----------------------------------------------------------------------------
-void handleRoot() {
-  server.send_P(200, "text/html", index_html);
-}
-
-// ----------------------------------------------------------------------------
-// handleStatus: Updates IMU data, computes UI drive speeds, and sends JSON.
-// ----------------------------------------------------------------------------
-void handleStatus() {
-  updateIMU();
-  
-  // Compute maximum speed in m/s from the speed slider (0–0.56 m/s)
-  float maxSpeed = 0.56f * (g_speed / 100.0f);
-  float halfSpeed = maxSpeed * 0.5f;
-  
-  // Determine which drive buttons are pressed (for UI display)
-  bool f  = g_forward;
-  bool rv = g_reverse;
-  bool l  = g_left;
-  bool r  = g_right;
-  
-  float portUI = 0.0f;
-  float starboardUI = 0.0f;
-  
-  // State table logic (UI only):
-  if      (f && l) { portUI =  halfSpeed; starboardUI =  maxSpeed; }
-  else if (f && r) { portUI =  maxSpeed;  starboardUI =  halfSpeed; }
-  else if (rv && l){ portUI = -halfSpeed; starboardUI = -maxSpeed; }
-  else if (rv && r){ portUI = -maxSpeed;  starboardUI = -halfSpeed; }
-  else if (f)      { portUI =  maxSpeed;  starboardUI =  maxSpeed; }
-  else if (rv)     { portUI = -maxSpeed;  starboardUI = -maxSpeed; }
-  else if (l)      { portUI = -maxSpeed;  starboardUI =  maxSpeed; }
-  else if (r)      { portUI =  maxSpeed;  starboardUI = -maxSpeed; }
-  else {
-    portUI = 0.0f;
-    starboardUI = 0.0f;
-  }
-  
-  String json = "{";
-  json += "\"pitch\":" + String(g_pitch, 2) + ",";
-  json += "\"roll\":"  + String(g_roll, 2) + ",";
-  json += "\"signal\":" + String(g_signal) + ",";
-  json += "\"port\":" + String(portUI, 2) + ",";
-  json += "\"starboard\":" + String(starboardUI, 2) + ",";
-  json += "\"power\":" + String(g_power) + ",";
-  json += "\"connected\":" + String(g_connected) + ",";
-  json += "\"attached\":" + String(g_attached) + ",";
-  json += "\"speed\":" + String(g_speed) + ",";
-  json += "\"forward\":" + String(g_forward ? 1 : 0) + ",";
-  json += "\"reverse\":" + String(g_reverse ? 1 : 0) + ",";
-  json += "\"left\":" + String(g_left ? 1 : 0) + ",";
-  json += "\"right\":" + String(g_right ? 1 : 0) + ",";
-  json += "\"stop\":" + String(g_stop ? 1 : 0) + ",";
-  json += "\"gimbalUp\":" + String(g_gimbalUp ? 1 : 0) + ",";
-  json += "\"gimbalDown\":" + String(g_gimbalDown ? 1 : 0) + ",";
-  json += "\"gimbalLeft\":" + String(g_gimbalLeft ? 1 : 0) + ",";
-  json += "\"gimbalRight\":" + String(g_gimbalRight ? 1 : 0);
-  json += "}";
-  
-  Serial.print("Status - Pitch: ");
-  Serial.print(g_pitch, 2);
-  Serial.print("°, Roll: ");
-  Serial.print(g_roll, 2);
-  Serial.print("°, PortUI: ");
-  Serial.print(portUI, 2);
-  Serial.print(" m/s, StarboardUI: ");
-  Serial.print(starboardUI, 2);
-  Serial.println(" m/s");
-  
-  server.send(200, "application/json", json);
-}
-
-// ----------------------------------------------------------------------------
-// handleCommand: Processes incoming commands and updates global state.
-// Digital write calls remain commented out.
-// ----------------------------------------------------------------------------
-void handleCommand() {
-  if (server.hasArg("cmd") && server.hasArg("state")) {
-    String cmd = server.arg("cmd");
-    int state = server.arg("state").toInt();
-    
-    Serial.print("Command received: ");
-    Serial.print(cmd);
-    Serial.print(" | State: ");
-    Serial.println(state);
-    
-    if (cmd == "forward") {
-      g_forward = (state == 1);
-      // digitalWrite(PIN_FORWARD, (state == 1) ? HIGH : LOW);
-    }
-    else if (cmd == "reverse") {
-      g_reverse = (state == 1);
-      // digitalWrite(PIN_REVERSE, (state == 1) ? HIGH : LOW);
-    }
-    else if (cmd == "left") {
-      g_left = (state == 1);
-      // digitalWrite(PIN_LEFT, (state == 1) ? HIGH : LOW);
-    }
-    else if (cmd == "right") {
-      g_right = (state == 1);
-      // digitalWrite(PIN_RIGHT, (state == 1) ? HIGH : LOW);
-    }
-    else if (cmd == "stop") {
-      g_stop = (state == 1);
-      // digitalWrite(PIN_STOP, (state == 1) ? HIGH : LOW);
-    }
-    else if (cmd == "gimbal-up") {
-      g_gimbalUp = (state == 1);
-      // digitalWrite(PIN_GIMBAL_UP, (state == 1) ? HIGH : LOW);
-    }
-    else if (cmd == "gimbal-down") {
-      g_gimbalDown = (state == 1);
-      // digitalWrite(PIN_GIMBAL_DOWN, (state == 1) ? HIGH : LOW);
-    }
-    else if (cmd == "gimbal-left") {
-      g_gimbalLeft = (state == 1);
-      // digitalWrite(PIN_GIMBAL_LEFT, (state == 1) ? HIGH : LOW);
-    }
-    else if (cmd == "gimbal-right") {
-      g_gimbalRight = (state == 1);
-      // digitalWrite(PIN_GIMBAL_RIGHT, (state == 1) ? HIGH : LOW);
-    }
-    else if (cmd == "speed") {
-      g_speed = state;
-      int dacVal = map(state, 0, 100, 0, 255);
-      dacWrite(PIN_SPEED, dacVal);
-    }
-    
-    server.send(200, "text/plain", "OK");
-  } else {
-    server.send(400, "text/plain", "Bad Request");
-  }
-}
-
-// ----------------------------------------------------------------------------
-// setup: Initializes Serial, IMU, WiFi AP, pins, and HTTP routes.
-// ----------------------------------------------------------------------------
-void setup() {
-  Serial.begin(115200);
-  randomSeed(analogRead(0));
-  
-  initIMU();
-  
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-  
-  // Configure output pins (digitalWrite calls remain commented in handleCommand)
-  pinMode(PIN_FORWARD, OUTPUT);       digitalWrite(PIN_FORWARD, LOW);
-  pinMode(PIN_REVERSE, OUTPUT);       digitalWrite(PIN_REVERSE, LOW);
-  pinMode(PIN_LEFT, OUTPUT);          digitalWrite(PIN_LEFT, LOW);
-  pinMode(PIN_RIGHT, OUTPUT);         digitalWrite(PIN_RIGHT, LOW);
-  pinMode(PIN_STOP, OUTPUT);          digitalWrite(PIN_STOP, LOW);
-  pinMode(PIN_GIMBAL_UP, OUTPUT);     digitalWrite(PIN_GIMBAL_UP, LOW);
-  pinMode(PIN_GIMBAL_DOWN, OUTPUT);   digitalWrite(PIN_GIMBAL_DOWN, LOW);
-  pinMode(PIN_GIMBAL_LEFT, OUTPUT);   digitalWrite(PIN_GIMBAL_LEFT, LOW);
-  pinMode(PIN_GIMBAL_RIGHT, OUTPUT);  digitalWrite(PIN_GIMBAL_RIGHT, LOW);
-  
-  WiFi.softAP("RooDash", "12345678");
-  IPAddress IP = WiFi.softAPIP();
-  Serial.print("AP IP address: ");
-  Serial.println(IP);
-  
-  server.on("/", handleRoot);
-  server.on("/status", handleStatus);
-  server.on("/command", handleCommand);
-  
-  server.begin();
-  Serial.println("HTTP server started");
-}
-
-// ----------------------------------------------------------------------------
-// loop: Handle client requests and process Serial input.
-// ----------------------------------------------------------------------------
-void loop() {
-  server.handleClient();
-  processSerialInput();
-}
+"        if (btn) btn.classList.add('ac
