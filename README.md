@@ -14,15 +14,11 @@ Roo is controlled over a WiFi network hosted by an ESP32. Driving is controlled 
 | G12       | ENA      |
 | G14       | ENB      |
 
----
-
 #### ESP32 - GY85
 | ESP32 Pin | GY85 Pin |
 |-----------|---------|
 | G21       | SDA     |
 | G22       | SCL     |
-
----
 
 #### ESP32 - ESP32-CAM (Resets)
 | ESP32 Pin | ESP32-CAM Function     |
@@ -30,8 +26,6 @@ Roo is controlled over a WiFi network hosted by an ESP32. Driving is controlled 
 | G18       | EN (Transistor) [Gimbal] |
 | G19       | EN (Transistor) [Static] |
 | G36       | (Transistor) [ESP32 RST] |
-
----
 
 #### ESP32 - Servo Motors
 | ESP32 Pin | Servo Motor Function  |
