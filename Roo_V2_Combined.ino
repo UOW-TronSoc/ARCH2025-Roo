@@ -4,25 +4,30 @@
 #include <Wire.h>
 #include <math.h>
 #include <esp_wifi.h>
-#include <ESP32Servo.h>  // Use ESP32Servo for ESP32 boards
+extern "C" {
+  #include <driver/ledc.h>
+}
+#include <ESP32Servo.h>  // For servo control on ESP32
 
 // ----------------------------------------------------------------------------
 // Pin Definitions
 // ----------------------------------------------------------------------------
-// Web/IMU and status display
-const int LED_PIN = 2;  // Built-in LED
+// Built-in LED (typically on GPIO2)
+const int LED_PIN = 2;
 
-// Motor driver (L298) pins – adjust as needed.
-const int MOTOR1_PWM = 15;   // PWM output for Port Motor
-const int MOTOR1_DIR = 16;   // Direction control for Port Motor
-const int MOTOR2_PWM = 17;   // PWM output for Starboard Motor
-const int MOTOR2_DIR = 26;   // Direction control for Starboard Motor
+// Motor driver (L928) pin assignments using hardware PWM:
+// Port Motor:
+const int PORT_FORWARD_PIN = 17;   // Forward signal for Port motor (LEDC channel 0)
+const int PORT_REVERSE_PIN = 0;    // Reverse signal for Port motor (LEDC channel 1)
+// Starboard Motor:
+const int STARBOARD_FORWARD_PIN = 4;   // Forward signal for Starboard motor (LEDC channel 2)
+const int STARBOARD_REVERSE_PIN = 16;  // Reverse signal for Starboard motor (LEDC channel 3)
 
 // Reset camera pins
 const int PIN_RESET_GIMBAL_CAM  = 18;
 const int PIN_RESET_FORWARD_CAM = 19;
 
-// IMU (GY85/ADXL345) I2C pins (used in initIMU: SDA = 21, SCL = 22)
+// IMU (GY85/ADXL345) I2C pins (configured in initIMU: SDA = 21, SCL = 22)
 #define ADXL345_ADDR 0x53
 
 // Servo control pins for gimbal (signal wires plugged directly into the ESP32)
@@ -30,21 +35,30 @@ const int SERVO_GIMBAL_LR = 27;  // Left/right servo signal
 const int SERVO_GIMBAL_UD = 5;   // Up/down servo signal
 
 // ----------------------------------------------------------------------------
-// Global Variables
+// PWM Configuration
 // ----------------------------------------------------------------------------
-// IMU data
+const int pwmFreq = 30000;     // 30 kHz PWM frequency
+const int pwmResolution = 8;   // 8-bit resolution (0-255)
+const ledc_mode_t pwmSpeedMode = LEDC_HIGH_SPEED_MODE;
+const int pwmTimer = LEDC_TIMER_0;  // Use the same timer for all channels
+
+// ----------------------------------------------------------------------------
+// Global Variables for Motor Speed
+// ----------------------------------------------------------------------------
+// For each motor, we store a desired speed (-255 to +255)
+int desiredSpeedMotor1 = 0;  // Port motor
+int desiredSpeedMotor2 = 0;  // Starboard motor
+
+// ----------------------------------------------------------------------------
+// Other Global Variables
+// ----------------------------------------------------------------------------
 float g_pitch = 0.0f;
 float g_roll  = 0.0f;
-
-// Status variables for UI display
 int   g_signal    = 0;
 int   g_power     = 1;
 int   g_connected = 1;
 int   g_attached  = 1;
-// Speed from the web slider (0–100)
-int   g_speed     = 50;
-
-// Control state variables (soft–coded; set via web commands)
+int   g_speed     = 50;  // Speed from web slider (0-100%)
 bool  g_forward    = false;
 bool  g_reverse    = false;
 bool  g_left       = false;
@@ -54,22 +68,11 @@ bool  g_gimbalUp   = false;
 bool  g_gimbalDown = false;
 bool  g_gimbalLeft = false;
 bool  g_gimbalRight= false;
-
-// Servo objects and starting positions (90° center)
 Servo gimbalLR;
 Servo gimbalUD;
 int gimbalLRPos = 90;
 int gimbalUDPos = 90;
-
-// Web server instance
 WebServer server(80);
-
-// ----------------------------------------------------------------------------
-// Global Variables for Software PWM
-// ----------------------------------------------------------------------------
-// These hold the desired motor speeds (0–255)
-int desiredSpeedMotor1 = 0;
-int desiredSpeedMotor2 = 0;
 
 // ----------------------------------------------------------------------------
 // Forward Declarations
@@ -81,15 +84,115 @@ void initIMU();
 void updateIMU();
 void processSerialInput();
 void setMotorSpeed(int motor, int speed);
-void updateMotorPWM();
+void setupLEDC();
+
+// ----------------------------------------------------------------------------
+// setupLEDC(): Configure LEDC channels without designated initializers
+// ----------------------------------------------------------------------------
+void setupLEDC() {
+  // Configure the timer
+  ledc_timer_config_t timer_conf;
+  timer_conf.speed_mode = pwmSpeedMode;
+  timer_conf.duty_resolution = (ledc_timer_bit_t)pwmResolution;
+  timer_conf.timer_num = (ledc_timer_t)pwmTimer;
+  timer_conf.freq_hz = pwmFreq;
+  timer_conf.clk_cfg = LEDC_AUTO_CLK;
+  ledc_timer_config(&timer_conf);
+
+  // Configure Port motor forward channel (channel 0)
+  ledc_channel_config_t ch0;
+  ch0.gpio_num = PORT_FORWARD_PIN;
+  ch0.speed_mode = pwmSpeedMode;
+  ch0.channel = LEDC_CHANNEL_0;
+  ch0.timer_sel = (ledc_timer_t)pwmTimer;
+  ch0.duty = 0;
+  ch0.hpoint = 0;
+  ch0.intr_type = LEDC_INTR_DISABLE;
+  ledc_channel_config(&ch0);
+
+  // Configure Port motor reverse channel (channel 1)
+  ledc_channel_config_t ch1;
+  ch1.gpio_num = PORT_REVERSE_PIN;
+  ch1.speed_mode = pwmSpeedMode;
+  ch1.channel = LEDC_CHANNEL_1;
+  ch1.timer_sel = (ledc_timer_t)pwmTimer;
+  ch1.duty = 0;
+  ch1.hpoint = 0;
+  ch1.intr_type = LEDC_INTR_DISABLE;
+  ledc_channel_config(&ch1);
+
+  // Configure Starboard motor forward channel (channel 2)
+  ledc_channel_config_t ch2;
+  ch2.gpio_num = STARBOARD_FORWARD_PIN;
+  ch2.speed_mode = pwmSpeedMode;
+  ch2.channel = LEDC_CHANNEL_2;
+  ch2.timer_sel = (ledc_timer_t)pwmTimer;
+  ch2.duty = 0;
+  ch2.hpoint = 0;
+  ch2.intr_type = LEDC_INTR_DISABLE;
+  ledc_channel_config(&ch2);
+
+  // Configure Starboard motor reverse channel (channel 3)
+  ledc_channel_config_t ch3;
+  ch3.gpio_num = STARBOARD_REVERSE_PIN;
+  ch3.speed_mode = pwmSpeedMode;
+  ch3.channel = LEDC_CHANNEL_3;
+  ch3.timer_sel = (ledc_timer_t)pwmTimer;
+  ch3.duty = 0;
+  ch3.hpoint = 0;
+  ch3.intr_type = LEDC_INTR_DISABLE;
+  ledc_channel_config(&ch3);
+}
+
+// ----------------------------------------------------------------------------
+// setMotorSpeed(): Uses LEDC hardware PWM to set duty cycles.
+// motor: 1 for Port, 2 for Starboard; speed: -255 to +255.
+void setMotorSpeed(int motor, int speed) {
+  int duty = abs(speed);
+  if (duty > 255) duty = 255;
+  
+  if (motor == 1) { // Port motor
+    if (speed > 0) {
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_0, duty);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_0);
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_1, 0);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_1);
+    } else if (speed < 0) {
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_0, 0);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_0);
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_1, duty);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_1);
+    } else {
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_0, 0);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_0);
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_1, 0);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_1);
+    }
+  } else { // Starboard motor
+    if (speed > 0) {
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_2, duty);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_2);
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_3, 0);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_3);
+    } else if (speed < 0) {
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_2, 0);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_2);
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_3, duty);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_3);
+    } else {
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_2, 0);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_2);
+      ledc_set_duty(pwmSpeedMode, LEDC_CHANNEL_3, 0);
+      ledc_update_duty(pwmSpeedMode, LEDC_CHANNEL_3);
+    }
+  }
+}
 
 // ----------------------------------------------------------------------------
 // IMU Setup and Update Functions
 // ----------------------------------------------------------------------------
 void initIMU() {
-  // Initialize I2C on SDA=21, SCL=22
   Wire.begin(21, 22);
-  // Set ADXL345 to measurement mode (write to POWER_CTL register)
   Wire.beginTransmission(ADXL345_ADDR);
   Wire.write(0x2D);
   Wire.write(0x08);
@@ -99,7 +202,7 @@ void initIMU() {
 
 void updateIMU() {
   Wire.beginTransmission(ADXL345_ADDR);
-  Wire.write(0x32); // Starting register for X-axis data
+  Wire.write(0x32);
   Wire.endTransmission(false);
   Wire.requestFrom(ADXL345_ADDR, 6, true);
   if (Wire.available() < 6) return;
@@ -109,8 +212,7 @@ void updateIMU() {
   float xs = x * 0.0039f;
   float ys = y * 0.0039f;
   float zs = z * 0.0039f;
-  // Compute roll and pitch (in degrees)
-  g_roll = atan2(xs, sqrtf(ys*ys + zs*zs)) * (180.0f / 3.14159f);
+  g_roll = atan2(xs, sqrtf(ys * ys + zs * zs)) * (180.0f / 3.14159f);
   g_pitch = -atan2(ys, zs) * (180.0f / 3.14159f) + 180;
 }
 
@@ -130,7 +232,7 @@ void processSerialInput() {
 }
 
 // ----------------------------------------------------------------------------
-// HTML/JavaScript Code (copied from your original ESP32 script)
+// HTML/JavaScript Code
 // ----------------------------------------------------------------------------
 const char index_html[] PROGMEM =
 "<!DOCTYPE html>"
@@ -140,6 +242,7 @@ const char index_html[] PROGMEM =
 "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />"
 "  <title>UOW Rover: Roo Control Panel</title>"
 "  <style>"
+"    /* CSS styles omitted for brevity; use your existing styles */"
 "    body { font-family: Arial, sans-serif; background-color: #282c34; color: white; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }"
 "    .header { text-align: center; padding: 20px 0; background-color: #20232a; border-bottom: 2px solid #61dafb; }"
 "    .container { display: flex; flex: 1; }"
@@ -421,39 +524,6 @@ const char index_html[] PROGMEM =
 "</html>";
 
 // ----------------------------------------------------------------------------
-// Motor Control Functions
-// ----------------------------------------------------------------------------
-// Instead of using hardware PWM, we store the desired speeds in globals and update
-// the motor output via software PWM.
-void setMotorSpeed(int motor, int speed) {
-  bool direction = (speed >= 0);
-  int pwm = abs(speed);
-  if (pwm > 255) pwm = 255;
-  
-  if (motor == 1) {
-    desiredSpeedMotor1 = pwm;
-    digitalWrite(MOTOR1_DIR, direction ? HIGH : LOW);
-  } else {
-    desiredSpeedMotor2 = pwm;
-    digitalWrite(MOTOR2_DIR, direction ? HIGH : LOW);
-  }
-}
-
-// This function implements a simple software PWM.
-// It uses the current millis() value modulo a chosen period (10ms here, ~100Hz)
-// to turn the PWM pin HIGH for a fraction of the period proportional to the desired duty cycle.
-void updateMotorPWM() {
-  unsigned long currentMillis = millis();
-  const int period = 10; // PWM period in ms (~100Hz)
-  int phase = currentMillis % period;
-  int duty1 = map(desiredSpeedMotor1, 0, 255, 0, period);
-  int duty2 = map(desiredSpeedMotor2, 0, 255, 0, period);
-  
-  digitalWrite(MOTOR1_PWM, (phase < duty1) ? HIGH : LOW);
-  digitalWrite(MOTOR2_PWM, (phase < duty2) ? HIGH : LOW);
-}
-
-// ----------------------------------------------------------------------------
 // Web Server Request Handlers
 // ----------------------------------------------------------------------------
 void handleRoot() {
@@ -463,24 +533,23 @@ void handleRoot() {
 void handleStatus() {
   updateIMU();
   
-  float maxSpeed = 0.56f * (g_speed / 100.0f);
-  float halfSpeed = maxSpeed * 0.5f;
-  
-  bool f  = g_forward;
+  float maxSpeedVal = 0.56f * (g_speed / 100.0f);
+  float halfSpeedVal = maxSpeedVal * 0.5f;
+  bool f = g_forward;
   bool rv = g_reverse;
-  bool l  = g_left;
-  bool r  = g_right;
+  bool l = g_left;
+  bool r = g_right;
   
   float portUI = 0.0f;
   float starboardUI = 0.0f;
-  if      (f && l) { portUI =  halfSpeed; starboardUI =  maxSpeed; }
-  else if (f && r) { portUI =  maxSpeed;  starboardUI =  halfSpeed; }
-  else if (rv && l){ portUI = -halfSpeed; starboardUI = -maxSpeed; }
-  else if (rv && r){ portUI = -maxSpeed;  starboardUI = -halfSpeed; }
-  else if (f)      { portUI =  maxSpeed;  starboardUI =  maxSpeed; }
-  else if (rv)     { portUI = -maxSpeed;  starboardUI = -maxSpeed; }
-  else if (l)      { portUI = -maxSpeed;  starboardUI =  maxSpeed; }
-  else if (r)      { portUI =  maxSpeed;  starboardUI = -maxSpeed; }
+  if      (f && l) { portUI = halfSpeedVal; starboardUI = maxSpeedVal; }
+  else if (f && r) { portUI = maxSpeedVal; starboardUI = halfSpeedVal; }
+  else if (rv && l){ portUI = -halfSpeedVal; starboardUI = -maxSpeedVal; }
+  else if (rv && r){ portUI = -maxSpeedVal;  starboardUI = -halfSpeedVal; }
+  else if (f)      { portUI = maxSpeedVal;  starboardUI = maxSpeedVal; }
+  else if (rv)     { portUI = -maxSpeedVal; starboardUI = -maxSpeedVal; }
+  else if (l)      { portUI = -maxSpeedVal; starboardUI = maxSpeedVal; }
+  else if (r)      { portUI = maxSpeedVal;  starboardUI = -maxSpeedVal; }
   else {
     portUI = 0.0f;
     starboardUI = 0.0f;
@@ -520,33 +589,15 @@ void handleCommand() {
     Serial.print(" | State: ");
     Serial.println(state);
     
-    if (cmd == "forward") {
-      g_forward = (state == 1);
-    }
-    else if (cmd == "reverse") {
-      g_reverse = (state == 1);
-    }
-    else if (cmd == "left") {
-      g_left = (state == 1);
-    }
-    else if (cmd == "right") {
-      g_right = (state == 1);
-    }
-    else if (cmd == "stop") {
-      g_stop = (state == 1);
-    }
-    else if (cmd == "gimbal-up") {
-      g_gimbalUp = (state == 1);
-    }
-    else if (cmd == "gimbal-down") {
-      g_gimbalDown = (state == 1);
-    }
-    else if (cmd == "gimbal-left") {
-      g_gimbalLeft = (state == 1);
-    }
-    else if (cmd == "gimbal-right") {
-      g_gimbalRight = (state == 1);
-    }
+    if (cmd == "forward") { g_forward = (state == 1); }
+    else if (cmd == "reverse") { g_reverse = (state == 1); }
+    else if (cmd == "left") { g_left = (state == 1); }
+    else if (cmd == "right") { g_right = (state == 1); }
+    else if (cmd == "stop") { g_stop = (state == 1); }
+    else if (cmd == "gimbal-up") { g_gimbalUp = (state == 1); }
+    else if (cmd == "gimbal-down") { g_gimbalDown = (state == 1); }
+    else if (cmd == "gimbal-left") { g_gimbalLeft = (state == 1); }
+    else if (cmd == "gimbal-right") { g_gimbalRight = (state == 1); }
     else if (cmd == "speed") {
       int newSpeed = state;
       if (newSpeed == 0) return;
@@ -558,9 +609,7 @@ void handleCommand() {
     else if (cmd == "rst-gim-cam") {
       digitalWrite(PIN_RESET_GIMBAL_CAM, (state == 1) ? HIGH : LOW);
     }
-    else if (cmd == "na") {
-      // No operation for NA
-    }
+    else if (cmd == "na") { /* No operation */ }
     
     server.send(200, "text/plain", "OK");
   } else {
@@ -581,16 +630,19 @@ void setup() {
   digitalWrite(LED_PIN, LOW);
   
   // Setup reset pins
-  pinMode(PIN_RESET_GIMBAL_CAM, OUTPUT); digitalWrite(PIN_RESET_GIMBAL_CAM, LOW);
-  pinMode(PIN_RESET_FORWARD_CAM, OUTPUT); digitalWrite(PIN_RESET_FORWARD_CAM, LOW);
+  pinMode(PIN_RESET_GIMBAL_CAM, OUTPUT);
+  digitalWrite(PIN_RESET_GIMBAL_CAM, LOW);
+  pinMode(PIN_RESET_FORWARD_CAM, OUTPUT);
+  digitalWrite(PIN_RESET_FORWARD_CAM, LOW);
   
-  // Setup motor control pins
-  pinMode(MOTOR1_DIR, OUTPUT);
-  pinMode(MOTOR2_DIR, OUTPUT);
-  pinMode(MOTOR1_PWM, OUTPUT);
-  pinMode(MOTOR2_PWM, OUTPUT);
+  // Setup motor driver pins as outputs
+  pinMode(PORT_FORWARD_PIN, OUTPUT);
+  pinMode(PORT_REVERSE_PIN, OUTPUT);
+  pinMode(STARBOARD_FORWARD_PIN, OUTPUT);
+  pinMode(STARBOARD_REVERSE_PIN, OUTPUT);
   
-  // (No LEDC initialization – using software PWM instead)
+  // Configure LEDC PWM channels
+  setupLEDC();
   
   // Attach servos for gimbal control
   gimbalLR.attach(SERVO_GIMBAL_LR);
@@ -598,6 +650,7 @@ void setup() {
   gimbalLR.write(gimbalLRPos);
   gimbalUD.write(gimbalUDPos);
   
+  // Start WiFi Access Point
   WiFi.softAP("RooDash", "12345678");
   IPAddress IP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
@@ -618,7 +671,7 @@ void loop() {
   server.handleClient();
   processSerialInput();
   
-  // Convert web speed (0–100) to PWM value (0–255)
+  // Map web speed (0–100) to PWM magnitude (0–255)
   int currentSpeedPWM = map(g_speed, 0, 100, 0, 255);
   
   // Motor driving logic based on control booleans:
@@ -644,20 +697,17 @@ void loop() {
     setMotorSpeed(1, -currentSpeedPWM);
     setMotorSpeed(2, -currentSpeedPWM);
   } else if (g_left) {
-    setMotorSpeed(1, currentSpeedPWM / 10);
-    setMotorSpeed(2, currentSpeedPWM / 10);
+    setMotorSpeed(1, -currentSpeedPWM / 2);
+    setMotorSpeed(2, currentSpeedPWM / 2);
   } else if (g_right) {
-    setMotorSpeed(1, ceil(currentSpeedPWM * 0.1));
-    setMotorSpeed(2, -ceil(currentSpeedPWM * 0.1));
+    setMotorSpeed(1, currentSpeedPWM / 2);
+    setMotorSpeed(2, -currentSpeedPWM / 2);
   } else {
     setMotorSpeed(1, 0);
     setMotorSpeed(2, 0);
   }
   
-  // Update motor PWM outputs via software PWM
-  updateMotorPWM();
-  
-  // Gimbal (servo) control based on control booleans
+  // Gimbal (servo) control based on control booleans:
   if (g_gimbalUp && gimbalUDPos < 180) gimbalUDPos++;
   if (g_gimbalDown && gimbalUDPos > 0) gimbalUDPos--;
   if (g_gimbalLeft && gimbalLRPos > 0) gimbalLRPos--;
@@ -666,5 +716,5 @@ void loop() {
   gimbalLR.write(gimbalLRPos);
   gimbalUD.write(gimbalUDPos);
   
-  delay(1); // Small delay to prevent hogging the CPU
+  delay(1);
 }
