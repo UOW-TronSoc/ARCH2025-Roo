@@ -1,7 +1,7 @@
 # ARCH2025-Roo
 
 Roo is controlled over a WiFi network hosted by an ESP32. Driving is controlled by a L298 motor driver using PWM signals from the ESP32. Servo's are used to control the gimbal, using pwm directly from the ESP32.
-================================================================================================
+---
 ### Pin Assignments
 
 #### ESP32 - L298
@@ -39,8 +39,7 @@ Roo is controlled over a WiFi network hosted by an ESP32. Driving is controlled 
 | G16       | SIG (Vertical)       |
 | G17       | SIG (Horizontal)     |
 
-================================================================================================
-
+---
 Wiring Diagram
 ![RooWiringV2](https://github.com/user-attachments/assets/f8aaf0cd-b4f8-4a04-869f-6129025d584e)
 
