@@ -5,14 +5,12 @@ Roo is controlled over a WiFi network hosted by an ESP32. Driving is controlled 
 ### Pin Assignments
 
 #### ESP32 - L298
-| ESP32 Pin | L298 Pin  |
+| ESP32 Pin | Cytron MDD20A Pin  |
 |-----------|----------|
-| G23       | IN4      |
-| G25       | IN3      |
-| G26       | IN2      |
-| G27       | IN1      |
-| G12       | ENA      |
-| G14       | ENB      |
+| G25       | PWM1      |
+| G26       | DIR1      |
+| G27       | PWM2      |
+| G14       | DIR2      |
 
 #### ESP32 - GY85
 | ESP32 Pin | GY85 Pin |
