@@ -4,18 +4,15 @@
 #include <Wire.h>
 #include <math.h>
 #include <esp_wifi.h>
-extern "C" {
-  #include <driver/ledc.h>
-}
 #include <ESP32Servo.h>
 
 // ============================================================================
 // Pin Assignments
 // ============================================================================
 // --- Cytron MDD20A Motor Driver ---
-const int MOTOR1_PWM = 25;   // PWM1 for Motor 1 (LEDC channel 0)
+const int MOTOR1_PWM = 25;   // PWM1 for Motor 1 (software PWM)
 const int MOTOR1_DIR = 26;   // DIR1 for Motor 1
-const int MOTOR2_PWM = 27;   // PWM2 for Motor 2 (LEDC channel 1)
+const int MOTOR2_PWM = 27;   // PWM2 for Motor 2 (software PWM)
 const int MOTOR2_DIR = 14;   // DIR2 for Motor 2
 
 // --- GY85 IMU ---
@@ -24,8 +21,8 @@ const int IMU_SCL = 22;      // SCL for GY85
 #define ADXL345_ADDR 0x53   // ADXL345 I2C address
 
 // --- ESP32-CAM (Resets) ---
-const int PIN_RESET_GIMBAL_CAM = 18;   // Gimbal camera reset
-const int PIN_RESET_STATIC_CAM = 19;   // Static camera reset
+const int PIN_RESET_GIMBAL_CAM = 18;   // Gimbal camera reset (transistor)
+const int PIN_RESET_STATIC_CAM = 19;   // Static camera reset (transistor)
 
 // --- Servo Motors (Gimbal) ---
 const int SERVO_VERTICAL_PIN   = 16;  // Vertical servo signal
@@ -35,12 +32,9 @@ const int SERVO_HORIZONTAL_PIN = 17;  // Horizontal servo signal
 const int LED_PIN = 2;       // Typically the built-in LED
 
 // ============================================================================
-// PWM Configuration for Motor Enable Pins
+// Software PWM Settings
 // ============================================================================
-const int pwmFreq = 30000;      // 30 kHz PWM frequency
-const int pwmResolution = 8;    // 8-bit resolution (0-255)
-const ledc_mode_t pwmSpeedMode = LEDC_HIGH_SPEED_MODE;
-// We'll use LEDC channel 0 for MOTOR1_PWM and channel 1 for MOTOR2_PWM
+const unsigned long pwmPeriodMicros = 20000;  // PWM period in microseconds (1ms = 1kHz)
 
 // ============================================================================
 // Global Variables for Motor Speed
@@ -57,7 +51,7 @@ int   g_signal    = 0;
 int   g_power     = 1;
 int   g_connected = 1;
 int   g_attached  = 1;
-int   g_speed     = 50;  // Web slider (0-100%)
+int   g_speed     = 50;  // Speed from web slider (0-100%)
 
 bool  g_forward    = false;
 bool  g_reverse    = false;
@@ -88,72 +82,56 @@ void initIMU();
 void updateIMU();
 void processSerialInput();
 void setMotorSpeed(int motor, int speed);
-void setupLEDC();
+void updateSoftwarePWM();
 
 // ============================================================================
-// setupLEDC(): Configure LEDC PWM channels for motor enable pins
-// ============================================================================
-void setupLEDC() {
-  // Configure LEDC timer
-  ledc_timer_config_t timer_conf;
-  timer_conf.speed_mode = pwmSpeedMode;
-  timer_conf.duty_resolution = (ledc_timer_bit_t)pwmResolution;
-  timer_conf.timer_num = LEDC_TIMER_0;
-  timer_conf.freq_hz = pwmFreq;
-  timer_conf.clk_cfg = LEDC_AUTO_CLK;
-  ledc_timer_config(&timer_conf);
-
-  // Configure Motor 1 enable channel (channel 0, MOTOR1_PWM)
-  ledc_channel_config_t ch0;
-  ch0.gpio_num = MOTOR1_PWM;
-  ch0.speed_mode = pwmSpeedMode;
-  ch0.channel = LEDC_CHANNEL_0;
-  ch0.timer_sel = LEDC_TIMER_0;
-  ch0.duty = 0;
-  ch0.hpoint = 0;
-  ch0.intr_type = LEDC_INTR_DISABLE;
-  ledc_channel_config(&ch0);
-
-  // Configure Motor 2 enable channel (channel 1, MOTOR2_PWM)
-  ledc_channel_config_t ch1;
-  ch1.gpio_num = MOTOR2_PWM;
-  ch1.speed_mode = pwmSpeedMode;
-  ch1.channel = LEDC_CHANNEL_1;
-  ch1.timer_sel = LEDC_TIMER_0;
-  ch1.duty = 0;
-  ch1.hpoint = 0;
-  ch1.intr_type = LEDC_INTR_DISABLE;
-  ledc_channel_config(&ch1);
-}
-
-// ============================================================================
-// setMotorSpeed(): Set motor speed using hardware PWM and digital direction
-// motor: 1 for Motor 1 (Channel A), 2 for Motor 2 (Channel B)
+// setMotorSpeed(): Sets desired speed and sets direction pin accordingly.
+// motor: 1 for Motor 1, 2 for Motor 2
 // speed: -255 (full reverse) to +255 (full forward)
 void setMotorSpeed(int motor, int speed) {
   int duty = abs(speed);
   if (duty > 255) duty = 255;
   
-  if (motor == 1) {  // Motor 1
+  if (motor == 1) {
     // Assume: DIR HIGH means forward, LOW means reverse.
-    if (speed > 0) {
+    if (speed > 0)
       digitalWrite(MOTOR1_DIR, HIGH);
-    } else if (speed < 0) {
+    else if (speed < 0)
       digitalWrite(MOTOR1_DIR, LOW);
-    } else {
+    else
       digitalWrite(MOTOR1_DIR, LOW);
-    }
-    ledcWrite(LEDC_CHANNEL_0, duty);
-  } else {  // Motor 2
-    if (speed > 0) {
+    desiredSpeedMotor1 = duty;
+  } else {
+    if (speed > 0)
       digitalWrite(MOTOR2_DIR, HIGH);
-    } else if (speed < 0) {
+    else if (speed < 0)
       digitalWrite(MOTOR2_DIR, LOW);
-    } else {
+    else
       digitalWrite(MOTOR2_DIR, LOW);
-    }
-    ledcWrite(LEDC_CHANNEL_1, duty);
+    desiredSpeedMotor2 = duty;
   }
+}
+
+// ============================================================================
+// updateSoftwarePWM(): Generate software PWM on the motor enable pins.
+// This function should be called as frequently as possible in the loop.
+void updateSoftwarePWM() {
+  unsigned long now = micros();
+  unsigned long phase = now % pwmPeriodMicros;
+  
+  // Motor 1 PWM output
+  unsigned long duty1 = map(desiredSpeedMotor1, 0, 255, 0, pwmPeriodMicros);
+  if (phase < duty1)
+    digitalWrite(MOTOR1_PWM, HIGH);
+  else
+    digitalWrite(MOTOR1_PWM, LOW);
+  
+  // Motor 2 PWM output
+  unsigned long duty2 = map(desiredSpeedMotor2, 0, 255, 0, pwmPeriodMicros);
+  if (phase < duty2)
+    digitalWrite(MOTOR2_PWM, HIGH);
+  else
+    digitalWrite(MOTOR2_PWM, LOW);
 }
 
 // ============================================================================
@@ -574,7 +552,7 @@ void handleCommand() {
     else if (cmd == "rst-gim-cam") {
       digitalWrite(PIN_RESET_GIMBAL_CAM, (state == 1) ? HIGH : LOW);
     }
-    else if (cmd == "na") { /* No operation */ }
+    else if (cmd == "na") { }
     
     server.send(200, "text/plain", "OK");
   } else {
@@ -582,9 +560,6 @@ void handleCommand() {
   }
 }
 
-// ============================================================================
-// setup()
-// ============================================================================
 void setup() {
   Serial.begin(115200);
   randomSeed(analogRead(0));
@@ -604,7 +579,16 @@ void setup() {
   pinMode(MOTOR1_DIR, OUTPUT);
   pinMode(MOTOR2_DIR, OUTPUT);
   
-  setupLEDC();
+  // Setup software PWM pins as outputs
+  pinMode(MOTOR1_PWM, OUTPUT);
+  pinMode(MOTOR2_PWM, OUTPUT);
+  
+  // Ensure PWM outputs are initially low
+  digitalWrite(MOTOR1_PWM, LOW);
+  digitalWrite(MOTOR2_PWM, LOW);
+  
+  desiredSpeedMotor1 = 0;
+  desiredSpeedMotor2 = 0;
   
   // Attach servo motors for gimbal control
   servoVertical.attach(SERVO_VERTICAL_PIN);
@@ -627,50 +611,46 @@ void setup() {
   Serial.println("HTTP server started");
 }
 
-// ============================================================================
-// loop()
-// ============================================================================
 void loop() {
   server.handleClient();
   processSerialInput();
   
-  // Map web speed (0-100) to PWM duty cycle (0-255)
+  updateSoftwarePWM();
+  
   int currentSpeedPWM = map(g_speed, 0, 100, 0, 255);
   
-  // Motor driving logic:
   if (g_stop) {
     setMotorSpeed(1, 0);
     setMotorSpeed(2, 0);
   } else if (g_forward && g_left) {
-    setMotorSpeed(1, currentSpeedPWM / 2);
-    setMotorSpeed(2, currentSpeedPWM);
-  } else if (g_forward && g_right) {
-    setMotorSpeed(1, currentSpeedPWM);
-    setMotorSpeed(2, currentSpeedPWM / 2);
-  } else if (g_reverse && g_left) {
     setMotorSpeed(1, -currentSpeedPWM / 2);
     setMotorSpeed(2, -currentSpeedPWM);
-  } else if (g_reverse && g_right) {
+  } else if (g_forward && g_right) {
     setMotorSpeed(1, -currentSpeedPWM);
     setMotorSpeed(2, -currentSpeedPWM / 2);
-  } else if (g_forward) {
-    setMotorSpeed(1, currentSpeedPWM);
+  } else if (g_reverse && g_left) {
+    setMotorSpeed(1, currentSpeedPWM / 2);
     setMotorSpeed(2, currentSpeedPWM);
-  } else if (g_reverse) {
+  } else if (g_reverse && g_right) {
+    setMotorSpeed(1, currentSpeedPWM);
+    setMotorSpeed(2, currentSpeedPWM / 2);
+  } else if (g_forward) {
     setMotorSpeed(1, -currentSpeedPWM);
     setMotorSpeed(2, -currentSpeedPWM);
+  } else if (g_reverse) {
+    setMotorSpeed(1, currentSpeedPWM);
+    setMotorSpeed(2, currentSpeedPWM);
   } else if (g_left) {
-    setMotorSpeed(1, currentSpeedPWM / 10);
-    setMotorSpeed(2, currentSpeedPWM / 10);
+    setMotorSpeed(1, -currentSpeedPWM);
+    setMotorSpeed(2, currentSpeedPWM);
   } else if (g_right) {
-    setMotorSpeed(1, ceil(currentSpeedPWM * 0.1));
-    setMotorSpeed(2, -ceil(currentSpeedPWM * 0.1));
+    setMotorSpeed(1, currentSpeedPWM);
+    setMotorSpeed(2, -currentSpeedPWM);
   } else {
     setMotorSpeed(1, 0);
     setMotorSpeed(2, 0);
   }
   
-  // Gimbal servo control:
   if (g_gimbalUp && servoVerticalPos < 180) servoVerticalPos++;
   if (g_gimbalDown && servoVerticalPos > 0) servoVerticalPos--;
   if (g_gimbalLeft && servoHorizontalPos > 0) servoHorizontalPos--;
