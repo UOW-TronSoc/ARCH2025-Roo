@@ -3,12 +3,12 @@
 #include <WebServer.h>
 
 // Replace with your network credentials
-const char* ssid = "RooDash";
-const char* password = "12345678";
+const char* ssid = "UOWRoverTeam-RooAP";
+const char* password = "RooRoverAP22";
 
 // Set your static IP configuration
-IPAddress local_IP(192, 168, 4, 9);
-IPAddress gateway(192, 168, 4, 1);      // Adjust as needed
+IPAddress local_IP(192, 168, 10, 212);
+IPAddress gateway(192, 168, 10, 1);      // Adjust as needed
 IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(8, 8, 8, 8);        // Optional
 IPAddress secondaryDNS(8, 8, 4, 4);      // Optional
@@ -112,15 +112,11 @@ void setup() {
   config.pixel_format = PIXFORMAT_JPEG;
   
   // Use higher frame size if PSRAM is available.
-  if (psramFound()) {
-    config.frame_size = FRAMESIZE_VGA;  // 640x480
-    config.jpeg_quality = 10;
-    config.fb_count = 2;
-  } else {
-    config.frame_size = FRAMESIZE_QVGA;  // 320x240
-    config.jpeg_quality = 12;
-    config.fb_count = 1;
-  }
+ 
+  config.frame_size = FRAMESIZE_QVGA;  // 320x240
+  config.jpeg_quality = 16;
+  config.fb_count = 1;
+
   
   // Initialize the camera
   esp_err_t err = esp_camera_init(&config);
