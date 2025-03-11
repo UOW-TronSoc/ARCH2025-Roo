@@ -630,11 +630,11 @@ void loop() {
     setMotorSpeed(1, currentSpeedPWM);
     setMotorSpeed(2, currentSpeedPWM);
   } else if (g_left) {
-    setMotorSpeed(1, -currentSpeedPWM);
-    setMotorSpeed(2, currentSpeedPWM);
+    setMotorSpeed(1, -currentSpeedPWM / 4);
+    setMotorSpeed(2, currentSpeedPWM / 4);
   } else if (g_right) {
-    setMotorSpeed(1, currentSpeedPWM);
-    setMotorSpeed(2, -currentSpeedPWM);
+    setMotorSpeed(1, currentSpeedPWM / 4);
+    setMotorSpeed(2, -currentSpeedPWM / 4);
   } else {
     setMotorSpeed(1, 0);
     setMotorSpeed(2, 0);
