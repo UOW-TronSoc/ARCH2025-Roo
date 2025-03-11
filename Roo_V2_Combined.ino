@@ -9,27 +9,22 @@
 // ============================================================================
 // Pin Assignments
 // ============================================================================
-// --- Cytron MDD20A Motor Driver ---
 const int MOTOR1_PWM = 25;   // PWM1 for Motor 1 (software PWM)
 const int MOTOR1_DIR = 26;   // DIR1 for Motor 1
 const int MOTOR2_PWM = 27;   // PWM2 for Motor 2 (software PWM)
 const int MOTOR2_DIR = 14;   // DIR2 for Motor 2
 
-// --- GY85 IMU ---
 const int IMU_SDA = 21;      // SDA for GY85
 const int IMU_SCL = 22;      // SCL for GY85
 #define ADXL345_ADDR 0x53   // ADXL345 I2C address
 
-// --- ESP32-CAM (Resets) ---
 const int PIN_RESET_GIMBAL_CAM = 18;   // Gimbal camera reset (transistor)
 const int PIN_RESET_STATIC_CAM = 19;   // Static camera reset (transistor)
 
-// --- Servo Motors (Gimbal) ---
 const int SERVO_VERTICAL_PIN   = 16;  // Vertical servo signal
 const int SERVO_HORIZONTAL_PIN = 17;  // Horizontal servo signal
 
-// --- Built-in LED ---
-const int LED_PIN = 2;       // Typically the built-in LED
+const int LED_PIN = 2;       // Built-in LED
 
 // ============================================================================
 // Software PWM Settings
@@ -39,8 +34,8 @@ const unsigned long pwmPeriodMicros = 20000;  // PWM period in microseconds (1ms
 // ============================================================================
 // Global Variables for Motor Speed
 // ============================================================================
-int desiredSpeedMotor1 = 0;  // Motor 1 speed (-255 to +255)
-int desiredSpeedMotor2 = 0;  // Motor 2 speed (-255 to +255)
+int desiredSpeedMotor1 = 0;
+int desiredSpeedMotor2 = 0;
 
 // ============================================================================
 // Other Global Variables
@@ -64,8 +59,8 @@ bool  g_gimbalLeft = false;
 bool  g_gimbalRight= false;
 
 // Servo objects for gimbal control
-Servo servoVertical;     // Vertical servo (G16)
-Servo servoHorizontal;   // Horizontal servo (G17)
+Servo servoVertical;
+Servo servoHorizontal;
 int servoVerticalPos = 90;
 int servoHorizontalPos = 90;
 
@@ -84,16 +79,11 @@ void processSerialInput();
 void setMotorSpeed(int motor, int speed);
 void updateSoftwarePWM();
 
-// ============================================================================
-// setMotorSpeed(): Sets desired speed and sets direction pin accordingly.
-// motor: 1 for Motor 1, 2 for Motor 2
-// speed: -255 (full reverse) to +255 (full forward)
 void setMotorSpeed(int motor, int speed) {
   int duty = abs(speed);
   if (duty > 255) duty = 255;
   
   if (motor == 1) {
-    // Assume: DIR HIGH means forward, LOW means reverse.
     if (speed > 0)
       digitalWrite(MOTOR1_DIR, HIGH);
     else if (speed < 0)
@@ -112,21 +102,16 @@ void setMotorSpeed(int motor, int speed) {
   }
 }
 
-// ============================================================================
-// updateSoftwarePWM(): Generate software PWM on the motor enable pins.
-// This function should be called as frequently as possible in the loop.
 void updateSoftwarePWM() {
   unsigned long now = micros();
   unsigned long phase = now % pwmPeriodMicros;
   
-  // Motor 1 PWM output
   unsigned long duty1 = map(desiredSpeedMotor1, 0, 255, 0, pwmPeriodMicros);
   if (phase < duty1)
     digitalWrite(MOTOR1_PWM, HIGH);
   else
     digitalWrite(MOTOR1_PWM, LOW);
   
-  // Motor 2 PWM output
   unsigned long duty2 = map(desiredSpeedMotor2, 0, 255, 0, pwmPeriodMicros);
   if (phase < duty2)
     digitalWrite(MOTOR2_PWM, HIGH);
@@ -134,9 +119,6 @@ void updateSoftwarePWM() {
     digitalWrite(MOTOR2_PWM, LOW);
 }
 
-// ============================================================================
-// IMU Setup and Update Functions (GY85/ADXL345)
-// ============================================================================
 void initIMU() {
   Wire.begin(IMU_SDA, IMU_SCL);
   Wire.beginTransmission(ADXL345_ADDR);
@@ -162,9 +144,6 @@ void updateIMU() {
   g_pitch = -atan2(ys, zs) * (180.0f / 3.14159f) + 180;
 }
 
-// ============================================================================
-// processSerialInput(): For debugging (reads from Serial)
-// ============================================================================
 void processSerialInput() {
   if (Serial.available() > 0) {
     String input = Serial.readStringUntil('\n');
@@ -177,9 +156,6 @@ void processSerialInput() {
   }
 }
 
-// ============================================================================
-// HTML/JavaScript Code
-// ============================================================================
 const char index_html[] PROGMEM =
 "<!DOCTYPE html>"
 "<html lang=\"en\">"
@@ -236,8 +212,8 @@ const char index_html[] PROGMEM =
 "  <div class=\"header\"><h1>UOW Rover: Roo Control Panel</h1></div>"
 "  <div class=\"container\">"
 "    <div class=\"video-feed\">"
-"      <div class=\"video-container\"><div class=\"video-title\">Gimbal</div><img id=\"feed1\" src=\"http://192.168.4.3/stream\" style=\"width:100%;\" /></div>"
-"      <div class=\"video-container\"><div class=\"video-title\">Front</div><img id=\"feed2\" src=\"http://192.168.4.9/stream\" style=\"width:100%;\" /></div>"
+"      <div class=\"video-container\"><div class=\"video-title\">Gimbal</div><img id=\"feed1\" src=\"http://192.168.10.211/stream\" style=\"width:100%;\" /></div>"
+"      <div class=\"video-container\"><div class=\"video-title\">Front</div><img id=\"feed2\" src=\"http://192.168.10.212/stream\" style=\"width:100%;\" /></div>"
 "    </div>"
 "    <div class=\"controls\">"
 "      <div class=\"status-row\">"
@@ -316,14 +292,14 @@ const char index_html[] PROGMEM =
 "    let lastStatusTime = performance.now();"
 "    function sendCommand(cmd, state) {"
 "      console.log('Command sent:', cmd, state);"
-"      fetch('http://192.168.4.1/command?cmd=' + encodeURIComponent(cmd) + '&state=' + state)"
+"      fetch('http://'+location.host+'/command?cmd=' + encodeURIComponent(cmd) + '&state=' + state)"
 "        .then(response => response.text())"
 "        .then(data => console.log('ESP32 responded:', data))"
 "        .catch(error => console.error('Error sending command:', error));"
 "    }"
 "    function fetchStatus() {"
 "      let startTime = performance.now();"
-"      fetch('http://192.168.4.1/status')"
+"      fetch('http://'+location.host+'/status')"
 "        .then(response => response.json())"
 "        .then(data => {"
 "          lastStatusTime = performance.now();"
@@ -583,7 +559,6 @@ void setup() {
   pinMode(MOTOR1_PWM, OUTPUT);
   pinMode(MOTOR2_PWM, OUTPUT);
   
-  // Ensure PWM outputs are initially low
   digitalWrite(MOTOR1_PWM, LOW);
   digitalWrite(MOTOR2_PWM, LOW);
   
@@ -596,11 +571,25 @@ void setup() {
   servoVertical.write(servoVerticalPos);
   servoHorizontal.write(servoHorizontalPos);
   
-  // Start WiFi Access Point
-  WiFi.softAP("RooDash", "12345678");
-  IPAddress IP = WiFi.softAPIP();
-  Serial.print("AP IP address: ");
-  Serial.println(IP);
+  // --- WiFi Setup for Static IP via Router Mode ---
+  WiFi.mode(WIFI_STA);
+  IPAddress local_IP(192, 168, 10, 210);
+  IPAddress gateway(192, 168, 10, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  WiFi.config(local_IP, gateway, subnet);
+  
+  Serial.print("Connecting to WiFi network: ");
+  Serial.println("UOWRoverTeam-RooAP");
+  WiFi.begin("UOWRoverTeam-RooAP", "RooRoverAP22");
+  
+  // Wait for connection
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected");
+  Serial.print("Device IP address: ");
+  Serial.println(WiFi.localIP());
   
   // Setup web server routes
   server.on("/", handleRoot);
@@ -623,11 +612,11 @@ void loop() {
     setMotorSpeed(1, 0);
     setMotorSpeed(2, 0);
   } else if (g_forward && g_left) {
-    setMotorSpeed(1, -currentSpeedPWM / 2);
-    setMotorSpeed(2, -currentSpeedPWM);
-  } else if (g_forward && g_right) {
     setMotorSpeed(1, -currentSpeedPWM);
     setMotorSpeed(2, -currentSpeedPWM / 2);
+  } else if (g_forward && g_right) {
+    setMotorSpeed(1, -currentSpeedPWM / 2);
+    setMotorSpeed(2, -currentSpeedPWM);
   } else if (g_reverse && g_left) {
     setMotorSpeed(1, currentSpeedPWM / 2);
     setMotorSpeed(2, currentSpeedPWM);
