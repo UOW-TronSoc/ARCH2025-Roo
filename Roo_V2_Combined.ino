@@ -68,7 +68,13 @@ int servoHorizontalPos = 90;
 WebServer server(80);
 
 // ============================================================================
-// New HTML Embedded Page (Full HTML code integrated)
+// Heartbeat Settings
+// ============================================================================
+unsigned long lastHeartbeat = 0; // Updated by heartbeat endpoint
+const unsigned long HEARTBEAT_THRESHOLD = 1500; // 1500 ms threshold
+
+// ============================================================================
+// New HTML Embedded Page (Full HTML code integrated with heartbeat)
 // ============================================================================
 const char index_html[] PROGMEM =
 "<!DOCTYPE html>"
@@ -124,6 +130,8 @@ const char index_html[] PROGMEM =
 "    .control-buttons button:hover { background-color: #21a1f1; }"
 "    .group-title { text-align: center; font-size: 18px; margin-bottom: 10px; }"
 "    button.active { background-color: #f23430 !important; }"
+"    /* Heartbeat Logging (for debugging) */"
+"    .heartbeat-log { display: none; }"
 "  </style>"
 "</head>"
 "<body>"
@@ -227,6 +235,8 @@ const char index_html[] PROGMEM =
 "        </div>"
 "      </div>"
 "    </div>"
+"    <!-- Hidden heartbeat log (for debugging if needed) -->"
+"    <div class=\"heartbeat-log\" id=\"heartbeat-log\"></div>"
 "  </div>"
 "  <script>"
 "    let lastStatusTime = performance.now();"
@@ -294,6 +304,14 @@ const char index_html[] PROGMEM =
 "    speedSlider.addEventListener('change', function() {"
 "      sliderActive = false;"
 "    });"
+"    // Heartbeat function to notify ESP32"
+"    function sendHeartbeat() {"
+"      fetch('http://' + location.host + '/heartbeat')"
+"        .then(response => response.text())"
+"        .then(data => console.log('Heartbeat OK:', data))"
+"        .catch(error => console.error('Heartbeat error:', error));"
+"    }"
+"    setInterval(sendHeartbeat, 1000);"
 "    setInterval(fetchStatus, 200);"
 "    setInterval(function() {"
 "      if (performance.now() - lastStatusTime > 400) {"
@@ -393,13 +411,13 @@ const char index_html[] PROGMEM =
 "</body>"
 "</html>";
 
-
 // ============================================================================
 // Forward Declarations
 // ============================================================================
 void handleRoot();
 void handleStatus();
 void handleCommand();
+void handleHeartbeat();
 void initIMU();
 void updateIMU();
 void processSerialInput();
@@ -571,6 +589,11 @@ void handleCommand() {
   }
 }
 
+void handleHeartbeat() {
+  lastHeartbeat = millis();
+  server.send(200, "text/plain", "OK");
+}
+
 void setup() {
   Serial.begin(115200);
   randomSeed(analogRead(0));
@@ -630,6 +653,7 @@ void setup() {
   server.on("/", handleRoot);
   server.on("/status", handleStatus);
   server.on("/command", handleCommand);
+  server.on("/heartbeat", handleHeartbeat);
   
   server.begin();
   Serial.println("HTTP server started");
@@ -640,6 +664,13 @@ void loop() {
   processSerialInput();
   
   updateSoftwarePWM();
+  
+  // Safety: if no heartbeat received within threshold, stop motors
+  if (millis() - lastHeartbeat > HEARTBEAT_THRESHOLD) {
+    setMotorSpeed(1, 0);
+    setMotorSpeed(2, 0);
+    g_stop = true;
+  }
   
   int currentSpeedPWM = map(g_speed, 0, 100, 0, 255);
   
