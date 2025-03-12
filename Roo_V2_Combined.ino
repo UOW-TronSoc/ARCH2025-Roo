@@ -46,7 +46,7 @@ int   g_signal    = 0;
 int   g_power     = 1;
 int   g_connected = 1;
 int   g_attached  = 1;
-int   g_speed     = 60;  // Speed from web slider (0-100%), default 60%
+int   g_speed     = 50;  // Speed from web slider (0-100%)
 
 bool  g_forward    = false;
 bool  g_reverse    = false;
@@ -68,13 +68,12 @@ int servoHorizontalPos = 90;
 WebServer server(80);
 
 // ============================================================================
-// Heartbeat Settings
-// ============================================================================
-unsigned long lastHeartbeat = 0; // Updated by heartbeat endpoint
-const unsigned long HEARTBEAT_THRESHOLD = 1500; // 1500 ms threshold
-
-// ============================================================================
-// New HTML Embedded Page (Full HTML code integrated with heartbeat)
+// Modified Embedded HTML Page
+// - Removed the header title band.
+// - Video containers' height is reduced by 10%.
+// - Pitch and Roll indicators are now side-by-side.
+// - Default speed slider label/value set to 50%.
+// - Power, Connected, Attached and STOP controls are arranged in a 2x2 grid.
 // ============================================================================
 const char index_html[] PROGMEM =
 "<!DOCTYPE html>"
@@ -85,17 +84,16 @@ const char index_html[] PROGMEM =
 "  <title>UOW Rover: Roo Control Panel</title>"
 "  <style>"
 "    body { font-family: Arial, sans-serif; background-color: #282c34; color: white; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }"
-"    .header { text-align: center; padding: 20px 0; background-color: #20232a; border-bottom: 2px solid #61dafb; }"
 "    .container { display: flex; flex-direction: column; flex: 1; }"
 "    /* Row 1: Video Feeds */"
 "    .video-feed { display: flex; flex-direction: row; justify-content: space-around; align-items: center; width: 100%; padding: 20px; box-sizing: border-box; }"
-"    .video-container { width: 48%; }"
+"    .video-container { width: 48%; transform: scaleY(0.9); transform-origin: top; }"
 "    .video-title { text-align: center; margin-bottom: 10px; }"
 "    img { width: 100%; height: auto; border: 2px solid #ccc; border-radius: 10px; }"
-"    /* Row 2: All Controls in one horizontal row */"
+"    /* Row 2: Controls Row */"
 "    .controls-row { display: flex; flex-direction: row; justify-content: space-around; align-items: flex-start; padding: 20px; box-sizing: border-box; gap: 20px; flex-wrap: nowrap; }"
-"    /* Group 1: Pitch & Roll Indicators */"
-"    .pitch-roll-group { display: flex; flex-direction: column; gap: 20px; min-width: 220px; }"
+"    /* Group 1: Pitch & Roll Indicators in one row */"
+"    .pitch-roll-group { display: flex; flex-direction: row; gap: 20px; min-width: 440px; }"
 "    .pitch, .roll { width: 200px; height: 20px; background-color: #444; position: relative; border-radius: 10px; overflow: hidden; }"
 "    .pitch::before, .roll::before { content: ''; position: absolute; width: 100%; height: 100%; background-color: #61dafb; transform-origin: center; transition: transform 0.3s; }"
 "    .pitch-indicator, .roll-indicator { text-align: center; }"
@@ -117,8 +115,8 @@ const char index_html[] PROGMEM =
 "    .speed-slider-container input[type=range] { -webkit-appearance: none; -moz-appearance: none; appearance: none; width: 200px; height: 20px; margin: 20px 0; }"
 "    .speed-slider-container input[type=range]::-webkit-slider-runnable-track { height: 8px; background: #444; border: 1px solid #ccc; border-radius: 5px; }"
 "    .speed-slider-container input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 20px; width: 20px; background: #61dafb; border: none; border-radius: 50%; margin-top: -6px; }"
-"    /* Group 4: Toggle Indicators (Status) */"
-"    .toggle-group { display: flex; flex-direction: column; gap: 10px; min-width: 120px; align-items: center; }"
+"    /* Group 4: Status Indicators arranged as 2x2 grid */"
+"    .toggle-group { display: grid; grid-template-columns: 1fr 1fr; grid-gap: 10px; min-width: 120px; }"
 "    .toggle-indicator, .stop-button { height: 50px; width: 100%; box-sizing: border-box; font-size: 16px; border-radius: 10px; cursor: pointer; transition: background-color 0.2s; text-align: center; line-height: 50px; background-color: #61dafb; color: #282c34; font-weight: bold; }"
 "    .toggle-indicator.off { background-color: #555; color: #ccc; }"
 "    .stop-button { background-color: #f23430; color: white; border: none; }"
@@ -130,12 +128,11 @@ const char index_html[] PROGMEM =
 "    .control-buttons button:hover { background-color: #21a1f1; }"
 "    .group-title { text-align: center; font-size: 18px; margin-bottom: 10px; }"
 "    button.active { background-color: #f23430 !important; }"
-"    /* Heartbeat Logging (for debugging) */"
+"    /* Heartbeat log (hidden) */"
 "    .heartbeat-log { display: none; }"
 "  </style>"
 "</head>"
 "<body>"
-"  <div class=\"header\"><h1>UOW Rover: Roo Control Panel</h1></div>"
 "  <div class=\"container\">"
 "    <!-- Row 1: Camera Feeds -->"
 "    <div class=\"video-feed\">"
@@ -150,7 +147,7 @@ const char index_html[] PROGMEM =
 "    </div>"
 "    <!-- Row 2: Controls Row -->"
 "    <div class=\"controls-row\">"
-"      <!-- Group 1: Pitch & Roll -->"
+"      <!-- Group 1: Pitch & Roll in one row -->"
 "      <div class=\"pitch-roll-group\">"
 "        <div class=\"pitch-indicator\">"
 "          <h3 class=\"indicator-label\">(F) Pitch (B)</h3>"
@@ -206,13 +203,12 @@ const char index_html[] PROGMEM =
 "      <div class=\"speed-group\">"
 "        <div class=\"group-title\">Speed</div>"
 "        <div class=\"speed-slider-container\">"
-"          <label id=\"speed-label\">60%</label>"
-"          <input type=\"range\" id=\"speed-slider\" min=\"0\" max=\"100\" step=\"25\" value=\"60\">"
+"          <label id=\"speed-label\">50%</label>"
+"          <input type=\"range\" id=\"speed-slider\" min=\"0\" max=\"100\" step=\"25\" value=\"50\">"
 "        </div>"
 "      </div>"
-"      <!-- Group 4: Status Indicators -->"
+"      <!-- Group 4: Status Indicators in 2x2 grid -->"
 "      <div class=\"toggle-group\">"
-"        <div class=\"group-title\">Status</div>"
 "        <div class=\"toggle-indicator\" id=\"power-indicator\">Power</div>"
 "        <div class=\"toggle-indicator off\" id=\"connected-indicator\">Connected</div>"
 "        <div class=\"toggle-indicator\" id=\"attached-indicator\">Attached</div>"
@@ -235,7 +231,7 @@ const char index_html[] PROGMEM =
 "        </div>"
 "      </div>"
 "    </div>"
-"    <!-- Hidden heartbeat log (for debugging if needed) -->"
+"    <!-- Hidden heartbeat log for debugging -->"
 "    <div class=\"heartbeat-log\" id=\"heartbeat-log\"></div>"
 "  </div>"
 "  <script>"
@@ -266,7 +262,7 @@ const char index_html[] PROGMEM =
 "          document.getElementById('roll-bar').style.transform = 'rotate(' + data.roll + 'deg)';"
 "          document.getElementById('port-value').textContent = data.port.toFixed(2) + ' m/s';"
 "          let portFill = document.querySelector('#port-level .fill');"
-"          let portPercent = (Math.abs(data.port) / 0.56) * 50;"
+"          let portPercent = (abs(data.port) / 0.56) * 50;"
 "          if (data.port >= 0) {"
 "            portFill.style.bottom = '50%';"
 "            portFill.style.top = 'auto';"
@@ -278,7 +274,7 @@ const char index_html[] PROGMEM =
 "          }"
 "          document.getElementById('starboard-value').textContent = data.starboard.toFixed(2) + ' m/s';"
 "          let starboardFill = document.querySelector('#starboard-level .fill');"
-"          let starboardPercent = (Math.abs(data.starboard) / 0.56) * 50;"
+"          let starboardPercent = (abs(data.starboard) / 0.56) * 50;"
 "          if (data.starboard >= 0) {"
 "            starboardFill.style.bottom = '50%';"
 "            starboardFill.style.top = 'auto';"
@@ -289,7 +285,7 @@ const char index_html[] PROGMEM =
 "            starboardFill.style.height = starboardPercent + '%';"
 "          }"
 "          if (!sliderActive) {"
-"            document.getElementById('speed-label').textContent = data.speed + '%';"
+"            document.getElementById('speed-label').textContent = 'Speed: ' + data.speed + '%';"
 "          }"
 "        })"
 "        .catch(error => console.error('Error fetching status:', error));"
@@ -298,20 +294,12 @@ const char index_html[] PROGMEM =
 "    speedSlider.addEventListener('input', function() {"
 "      sliderActive = true;"
 "      let val = this.value;"
-"      document.getElementById('speed-label').textContent = val + '%';"
+"      document.getElementById('speed-label').textContent = 'Speed: ' + val + '%';"
 "      sendCommand('speed', val);"
 "    });"
 "    speedSlider.addEventListener('change', function() {"
 "      sliderActive = false;"
 "    });"
-"    // Heartbeat function to notify ESP32"
-"    function sendHeartbeat() {"
-"      fetch('http://' + location.host + '/heartbeat')"
-"        .then(response => response.text())"
-"        .then(data => console.log('Heartbeat OK:', data))"
-"        .catch(error => console.error('Heartbeat error:', error));"
-"    }"
-"    setInterval(sendHeartbeat, 1000);"
 "    setInterval(fetchStatus, 200);"
 "    setInterval(function() {"
 "      if (performance.now() - lastStatusTime > 400) {"
@@ -417,7 +405,6 @@ const char index_html[] PROGMEM =
 void handleRoot();
 void handleStatus();
 void handleCommand();
-void handleHeartbeat();
 void initIMU();
 void updateIMU();
 void processSerialInput();
@@ -589,11 +576,6 @@ void handleCommand() {
   }
 }
 
-void handleHeartbeat() {
-  lastHeartbeat = millis();
-  server.send(200, "text/plain", "OK");
-}
-
 void setup() {
   Serial.begin(115200);
   randomSeed(analogRead(0));
@@ -653,7 +635,6 @@ void setup() {
   server.on("/", handleRoot);
   server.on("/status", handleStatus);
   server.on("/command", handleCommand);
-  server.on("/heartbeat", handleHeartbeat);
   
   server.begin();
   Serial.println("HTTP server started");
@@ -664,13 +645,6 @@ void loop() {
   processSerialInput();
   
   updateSoftwarePWM();
-  
-  // Safety: if no heartbeat received within threshold, stop motors
-  if (millis() - lastHeartbeat > HEARTBEAT_THRESHOLD) {
-    setMotorSpeed(1, 0);
-    setMotorSpeed(2, 0);
-    g_stop = true;
-  }
   
   int currentSpeedPWM = map(g_speed, 0, 100, 0, 255);
   
