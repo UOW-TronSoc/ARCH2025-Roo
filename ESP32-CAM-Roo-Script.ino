@@ -1,17 +1,17 @@
 #include "esp_camera.h"
 #include <WiFi.h>
-#include <WebServer.h>
+#include "esp_wifi.h"  // Include to control WiFi power saving mode
 
 // Replace with your network credentials
 const char* ssid = "UOWRoverTeam-RooAP";
 const char* password = "RooRoverAP22";
 
-// Set your static IP configuration
-IPAddress local_IP(192, 168, 10, 212);
-IPAddress gateway(192, 168, 10, 1);      // Adjust as needed
+// Set your static IP configuration (adjust for each camera)
+IPAddress local_IP(192, 168, 10, 212); // For example: adjust per device
+IPAddress gateway(192, 168, 10, 1);      
 IPAddress subnet(255, 255, 255, 0);
-IPAddress primaryDNS(8, 8, 8, 8);        // Optional
-IPAddress secondaryDNS(8, 8, 4, 4);      // Optional
+IPAddress primaryDNS(8, 8, 8, 8);
+IPAddress secondaryDNS(8, 8, 4, 4);
 
 // Camera pin configuration for AI Thinker ESP32-CAM
 #define PWDN_GPIO_NUM     32
@@ -31,59 +31,26 @@ IPAddress secondaryDNS(8, 8, 4, 4);      // Optional
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
-WebServer server(80);
+WiFiServer server(80);
 
-//
-// Handler that streams the MJPEG feed continuously.
-// The stream is served as multipart/x-mixed-replace.
-void handleJPGStream() {
-  WiFiClient client = server.client();
-  String response = "HTTP/1.1 200 OK\r\n";
-  response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
-  server.sendContent(response);
-  
-  while (1) {
-    camera_fb_t *fb = esp_camera_fb_get();
-    if (!fb) {
-      Serial.println("Camera capture failed");
-      break;
-    }
-    
-    // Build the MJPEG frame header
-    response = "--frame\r\n";
-    response += "Content-Type: image/jpeg\r\n\r\n";
-    server.sendContent(response);
-    
-    // Send the JPEG image
-    client.write(fb->buf, fb->len);
-    server.sendContent("\r\n");
-    
-    // Return the frame buffer back to the driver for reuse
-    esp_camera_fb_return(fb);
-    
-    // If the client disconnects, exit the loop
-    if (!client.connected()) {
-      break;
-    }
+void handleCapture(WiFiClient &client) {
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("Camera capture failed");
+    client.print("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+    return;
   }
-}
-
-//
-// Starts the web server and defines the stream endpoint.
-//
-void startCameraServer() {
-  // Define the /stream URL which will deliver the raw MJPEG feed
-  server.on("/stream", HTTP_GET, [](){
-    // This call will block as long as the client is connected
-    handleJPGStream();
-  });
   
-  server.begin();
+  // Build header with Content-Length to avoid caching issues.
+  String header = "HTTP/1.1 200 OK\r\n";
+  header += "Content-Type: image/jpeg\r\n";
+  header += "Content-Length: " + String(fb->len) + "\r\n";
+  header += "Cache-Control: no-cache, no-store, must-revalidate\r\n\r\n";
+  client.print(header);
+  client.write(fb->buf, fb->len);
+  esp_camera_fb_return(fb);
 }
 
-//
-// Setup: Initialize camera, connect to Wi-Fi, and start the server.
-//
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
@@ -111,41 +78,56 @@ void setup() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
   
-  // Use higher frame size if PSRAM is available.
- 
-  config.frame_size = FRAMESIZE_QVGA;  // 320x240
-  config.jpeg_quality = 16;
+  // Use QVGA resolution to reduce bandwidth (320x240)
+  config.frame_size = FRAMESIZE_QVGA;
+  config.jpeg_quality = 12;
   config.fb_count = 1;
 
-  
-  // Initialize the camera
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
     return;
   }
   
-  // Configure Wi-Fi with a static IP
+  // Configure Wi-Fi with static IP
   WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS);
-  WiFi.begin(ssid, password);
   
+  // Set maximum transmit power (20.5 dBm is available on many boards)
+  WiFi.setTxPower(WIFI_POWER_20_5dBm);
+  
+  // Start WiFi connection
+  WiFi.begin(ssid, password);
   Serial.print("Connecting to Wi-Fi");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  
   Serial.println();
-  Serial.print("Wi-Fi connected. IP address: ");
+  Serial.print("Camera IP: ");
   Serial.println(WiFi.localIP());
   
-  // Start the streaming server
-  startCameraServer();
+  // Disable Wi-Fi power saving mode to ensure low latency and continuous connectivity
+  esp_wifi_set_ps(WIFI_PS_NONE);
+  
+  server.begin();
 }
 
-//
-// Main loop: Handle client requests.
-//
 void loop() {
-  server.handleClient();
+  WiFiClient client = server.available();
+  if (client) {
+    // Wait until client sends data
+    while (client.connected() && !client.available()) {
+      delay(1);
+    }
+    String req = client.readStringUntil('\r');
+    Serial.println("Request: " + req);
+    // If the request URL contains /capture, serve a single JPEG frame.
+    if (req.indexOf("/capture") != -1) {
+      handleCapture(client);
+    } else {
+      client.print("HTTP/1.1 404 Not Found\r\n\r\n");
+    }
+    delay(1);
+    client.stop();
+  }
 }
