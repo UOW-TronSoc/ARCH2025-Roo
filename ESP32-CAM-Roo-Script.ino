@@ -7,7 +7,7 @@ const char* ssid = "UOWRoverTeam-RooAP";
 const char* password = "RooRoverAP22";
 
 // Set your static IP configuration (adjust for each camera)
-IPAddress local_IP(192, 168, 10, 212); // For example: adjust per device
+IPAddress local_IP(192, 168, 10, 211); // For example: adjust per device
 IPAddress gateway(192, 168, 10, 1);      
 IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(8, 8, 8, 8);
@@ -79,7 +79,7 @@ void setup() {
   config.pixel_format = PIXFORMAT_JPEG;
   
   // Use QVGA resolution to reduce bandwidth (320x240)
-  config.frame_size = FRAMESIZE_QVGA;
+  config.frame_size = FRAMESIZE_VGA;
   config.jpeg_quality = 12;
   config.fb_count = 1;
 
@@ -113,6 +113,20 @@ void setup() {
 }
 
 void loop() {
+  // Check WiFi connection status, and attempt to reconnect if disconnected.
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi disconnected. Attempting to reconnect in 5 seconds...");
+    delay(5000);
+    WiFi.begin(ssid, password);
+    // Wait until reconnected
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+    }
+    Serial.println("Reconnected to WiFi!");
+    Serial.print("Camera IP: ");
+    Serial.println(WiFi.localIP());
+  }
+  
   WiFiClient client = server.available();
   if (client) {
     // Wait until client sends data
