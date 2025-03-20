@@ -876,7 +876,7 @@ void loop() {
   if (currentMillis - lastServoUpdate >= servoInterval) {
     lastServoUpdate = currentMillis;
     if (g_gimbalUp && servoVerticalPos > 75) servoVerticalPos--;
-    if (g_gimbalDown && servoVerticalPos < 180) servoVerticalPos++;
+    if (g_gimbalDown && servoVerticalPos < 155) servoVerticalPos++;
     if (g_gimbalRight && servoHorizontalPos > 0) servoHorizontalPos--;
     if (g_gimbalLeft && servoHorizontalPos < 180) servoHorizontalPos++;
     servoVertical.write(servoVerticalPos);
